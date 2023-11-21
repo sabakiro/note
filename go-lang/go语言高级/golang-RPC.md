@@ -896,3 +896,384 @@ func main() {
 但是因为RPC缺乏流机制导致每次只能返回一个结果。
 在发布和订阅模式中，由调用者主动发起的发布行为类似一个普通函数调用，
 而被动的订阅者则类似gRPC客户端单向流中的接收者
+
+# gRPC进阶
+## 证书认证
+```sh
+#生成服务器私钥server.key
+openssl genrsa -out server.key 2048
+
+#生成服务器证书server.crt ,“server.grpc.io”表示服务器名
+openssl req -new -x509 -days 3650 -subj "/C=GB/L=China/0=grpc-server/CN=server.grpc.io" -key server.key -out server.crt
+
+#生成客户端私钥client.key
+openssl genrsa -out client.key 2048
+
+#生成客户端证书client.crt
+openssl req -new -x509 -days 3650 -subj "/C=GB/L=China/0=grpc-client/CN=client.grpc.io" -key client.key -out client.crt
+```
+启动服务时选择证书参数
+```go
+package main
+
+import (
+	"log"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+)
+
+func main() {
+	/*
+	credentials.NewServerTLSFromFile()函数
+	是从文件为服务器构造证书对象，
+	*/
+	creds, err := credentials.NewServerTLSFromFile("server.crt", "server.key")
+	if err != nil {
+		log.Fatal(err)
+	}
+	/*
+	然后通过grpc.Creds(creds)函数将证书包装为选项后作为参数
+	传入grpc.NewServer()函数。
+	*/
+	server := grpc.NewServer(grpc.Creds(creds))
+
+	...
+}
+```
+客户端代码
+```go
+func main(){
+	/*
+	credentials.NewClientTLSFromFile是构造客户端用的证书对象，
+	第一个参数是服务器的证书文件，第二个参数是签发证书的服务器的名字。
+	*/
+	creds, err := credentials.NewClientTLSFromFile(
+			"server.crt", "server.grpc.io",
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+	/*
+	然后通过grpc.WithTransportCredentials(creds)将
+	证书对象转为参数选项传入grpc.Dial()函数。
+	*/
+	conn, err := grpc.
+			Dial("localhost:5000", grpc.WithTransportCredentials(creds))
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer conn.Close()
+		...
+}
+```
+以上这种方式，需要提前将服务器的证书告知客户端，这样客户端在链接服务器时才能对服务器证书进行认证
+#### 根证书
+生成根证书
+```sh
+openssl genrsa -out ca.key 2048
+openssl req -new -x509 -days 3650 -subj "/C=GB/L=China/0=gobook/CN=github.com" -key ca.key -out ca.crt
+
+```
+重新对服务器端证书进行签名
+```sh
+openssl req -new -subj "/C=GB/L=China/0=server/CN=server.io" -key server.key -out server.csr
+openssl x509 -req -sha256 -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 -in server.csr -out server.crt
+```
+用CA根证书对客户端证书签名
+```sh
+openssl req -new -subj "/C=GB/L=China/0=client/CN=client.io" -key client.key -out client.csr
+openssl x509 -req -sha256 -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 -in client.csr -out client.crt
+```
+客户端代码
+```go
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
+	"log"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+)
+
+func main() {
+
+	certificate, err := tls.LoadX509KeyPair("client.crt", "client.key")
+	if err != nil {
+		log.Fatal(err)
+	}
+	certPool := x509.NewCertPool()
+	ca, err := ioutil.ReadFile("ca.crt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if ok := certPool.AppendCertsFromPEM(ca); !ok {
+		log.Fatal("failed to append ca certs")
+	}
+	
+	/*
+		在新的客户端代码中，我们不再直接依赖服务器端证书文件。
+		在credentials.NewTLS()函数调用中，
+		客户端通过引入一个CA根证书和服务器的名字来实现对服务器进行验证。
+	*/
+	tlsServerName := "server.io"
+	creds := credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		ServerName:   tlsServerName, // NOTE: this is required!
+		RootCAs:      certPool,
+	})
+	/*
+	客户端在链接服务器时会首先请求服务器的证书，
+		然后使用CA根证书对收到的服务器端证书进行验证。
+		如果客户端的证书也采用CA根证书签名的话，
+		服务器端也可以对客户端进行证书认证。我们用CA根证书对客户端证书签名：
+	*/
+	conn, err := grpc.Dial(
+		"localhost:5000", grpc.WithTransportCredentials(creds),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+}
+```
+服务端代码
+```go
+	//配置证书
+	certificate, err := tls.LoadX509KeyPair("server.crt", "server.key")
+	if err != nil {
+		log.Fatal(err)
+	}
+	certPool := x509.NewCertPool()
+	ca, err := ioutil.ReadFile("ca.crt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	if ok := certPool.AppendCertsFromPEM(ca); !ok {
+		log.Fatal("failed to append certs")
+	}
+	creds := credentials.NewTLS(&tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		ClientAuth:   tls.RequireAndVerifyClientCert, // NOTE: this is optional!
+		ClientCAs:    certPool,
+	})
+	server := grpc.NewServer(grpc.Creds(creds))
+	...
+```
+
+服务器端同样改用credentials.NewTLS()函数生成证书，
+通过ClientCAs选择CA根证书，并通过ClientAuth选项启用对客户端进行验证
+## Token认证
+gRPC还为每个gRPC方法调用提供了认证支持，
+这样就可以基于用户Token对不同的方法访问进行权限管理。
+要实现对每个gRPC方法进行认证，
+需要实现grpc.PerRPCCredentials接口:
+```go
+type PerRPCCredentials interface {
+    // GetRequestMetadata gets the current request metadata, refreshing
+    // tokens if required. This should be called by the transport layer on
+    // each request, and the data should be populated in headers or other
+    // context. If a status code is returned, it will be used as the status
+    // for the RPC. uri is the URI of the entry point for the request.
+    // When supported by the underlying implementation, ctx can be used for
+    // timeout and cancellation.
+    // TODO(zhaoq): Define the set of the qualified keys instead of leaving
+    // it as an arbitrary string.
+    GetRequestMetadata(ctx context.Context, uri ...string) (
+        map[string]string,    error,
+    )
+    // RequireTransportSecurity indicates whether the credentials requires
+    // transport security.
+    /*
+    在GetRequestMetadata()方法中返回认证需要的必要信息。
+    RequireTransportSecurity()方法表示是否要求底层使用安全链接
+    */
+    RequireTransportSecurity() bool
+}
+```
+创建一个Authentication类型，用于实现用户名和密码的认证：
+```go
+type Authentication struct {
+    User     string
+    Password string
+}
+func (a *Authentication) GetRequestMetadata(context.Context, ...string) (
+    map[string]string, error,
+) {
+    return map[string]string{"user":a.User, "password": a.Password}, nil
+}
+func (a *Authentication) RequireTransportSecurity() bool {
+    return false
+}
+//然后在每次请求gRPC服务时就可以将Token信息作为参数选项传入
+func main() {
+    auth := Authentication{
+        Login:    "gopher",
+        Password: "password",
+    }
+    /*
+    通过grpc.WithPerRPCCredentials()函数将Authentication对象转为grpc.Dial参数。
+    因为这里没有启用安全链接，所以需要传入grpc.WithInsecure()表示忽略证书认证。
+    */
+    conn, err := grpc.
+	    Dial("localhost"+port, grpc.WithInsecure(), 
+		    grpc.WithPerRPCCredentials(&auth))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    ...
+}
+
+//然后在gRPC服务器端的每个方法中通过Authentication类型的Auth()方法进行身份认证：
+type grpcServer struct { auth *Authentication }
+func (p *grpcServer) SomeMethod(
+    ctx context.Context, in *HelloRequest,
+) (*HelloReply, error) {
+    if err := p.auth.Auth(ctx); err != nil {
+        return nil, err
+    }
+    return &HelloReply{Message: "Hello " + in.Name}, nil
+}
+/*
+	详细的认证工作主要在Authentication.Auth()方法中完成。
+	首先通过metadata.FromIncomingContext()从ctx上下文中获取元信息，
+	然后取出相应的认证信息进行认证。
+	如果认证失败，则返回一个codes.Unauthenticated类型的错误。
+*/
+func (a *Authentication) Auth(ctx context.Context) error {
+    md, ok := metadata.FromIncomingContext(ctx)
+    if !ok {
+        return fmt.Errorf("missing credentials")
+    }
+    var appid string
+    var appkey string
+    if val, ok := md["login"]; ok { appid = val[0] }
+    if val, ok := md["password"]; ok { appkey = val[0] }
+    if appid != a.Login || appkey != a.Password {
+        return grpc.Errorf(codes.Unauthenticated, "invalid token")
+    }
+    return nil
+}
+```
+## 截取器
+gRPC中的grpc.UnaryInterceptor和grpc.StreamInterceptor分别对普通方法和流方法提供了截取器的支持
+要实现普通方法的截取器，需要为grpc.UnaryInterceptor的参数实现一个函数
+```go
+func filter(ctx context.Context,//函数的参数ctx
+		    req interface{}, //和req就是每个普通的RPC方法的前两个参数
+		    info *grpc.UnaryServerInfo,//第三个参数info表示当前对应的那个gRPC方法
+		    handler grpc.UnaryHandler,//第四个参数handler对应当前的gRPC函数。
+) (resp interface{}, err error) {
+    log.Println("fileter:", info)
+    return handler(ctx, req)
+}
+/*
+上面的函数中首先是日志输出info参数，然后调用handler对应的gRPC函数。
+*/
+
+```
+要使用filter()截取器函数，只需要在启动gRPC服务时作为参数输入即可：
+```go
+server := grpc.NewServer(grpc.UnaryInterceptor(filter))
+```
+然后服务器在收到每个gRPC方法调用之前，会首先输出一行日志，然后再调用对方的方法。
+
+如果截取器函数返回了错误，那么该次gRPC方法调用将被视作失败处理。
+可以在截取器中对输入的参数做一些简单的验证工作。
+同样，也可以对handler返回的结果做一些验证工作。
+截取器也非常适合前面对Token的认证工作。
+
+截取器增加了对gRPC方法异常的捕获
+```go
+func filter(
+    ctx context.Context, req interface{},
+    info *grpc.UnaryServerInfo,
+    handler grpc.UnaryHandler,
+) (resp interface{}, err error) {
+    log.Println("fileter:", info)
+    defer func() {
+        if r := recover(); r != nil {
+            err = fmt.Errorf("panic: %v", r)
+        }
+    }()
+    return handler(ctx, req)
+}
+```
+gRPC框架中只能为每个服务设置一个截取器，
+因此所有的截取工作只能在一个函数中完成。
+开源的grpc-ecosystem项目中的go-grpc-middleware包
+已经基于gRPC对截取器实现了链式截取的支持。
+```go
+import "github.com/grpc-ecosystem/go-grpc-middleware"
+myServer := grpc.NewServer(
+    grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+        filter1, filter2, ...
+    )),
+    grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+        filter1, filter2, ...
+    )),
+)
+```
+## 和Web服务共存
+
+```go
+	//对于没有启动TLS协议的服务则需要对HTTP/2特性做适当的调整
+	mux := http.NewServeMux()
+    h2Handler := h2c.NewHandler(mux, &http2.Server{})
+    server = &http.Server{Addr: ":3999", Handler: h2Handler}
+    server.ListenAndServe()
+    
+    //启用普通的HTTPS服务器
+    mux := http.NewServeMux()
+    mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+        fmt.Fprintln(w, "hello")
+    })
+    http.ListenAndServeTLS(port, "server.crt", "server.key",
+        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            mux.ServeHTTP(w, r)
+            return
+        }),
+    )
+	
+	//单独启用带证书的gRPC服务
+    creds, err := credentials.NewServerTLSFromFile("server.crt", "server.key")
+    if err != nil {
+        log.Fatal(err)
+    }
+    grpcServer := grpc.NewServer(grpc.Creds(creds))
+    ...
+	/*
+	因为gRPC服务已经实现了ServeHTTP()方法，
+	可以直接作为Web路由处理对象。
+	如果将gRPC和Web服务放在一起，会导致gRPC和Web路径的冲突，
+	在处理时我们需要区分这两类服务。
+	
+	通过以下方式生成同时支持Web和gRPC协议的路由处理函数
+	
+	首先gRPC建立在HTTP/2版本之上，
+	如果HTTP不是HTTP/2协议则必然无法提供gRPC支持。
+	*/
+    http.ListenAndServeTLS(port, "server.crt", "server.key",
+        http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            if r.ProtoMajor != 2 {
+                mux.ServeHTTP(w, r)
+                return
+            }
+            //每个gRPC调用请求的Content-Type类型会被标注为"application/grpc"类型。
+            if strings.Contains(
+                r.Header.Get("Content-Type"), "application/grpc",
+            ) {
+                grpcServer.ServeHTTP(w, r) // gRPC Server
+                return
+            }
+            //这样就可以在gRPC端口上同时提供Web服务了。
+            mux.ServeHTTP(w, r)
+            return
+        }),
+    )
+	
+```
+# gRPC和Protobuf扩展
