@@ -1164,7 +1164,9 @@ gRPC中的grpc.UnaryInterceptor和grpc.StreamInterceptor分别对普通方法和
 ```go
 func filter(ctx context.Context,//函数的参数ctx
 		    req interface{}, //和req就是每个普通的RPC方法的前两个参数
-		    info *grpc.UnaryServerInfo,//第三个参数info表示当前对应的那个gRPC方法
+		    
+		    //第三个参数info表示当前对应的那个gRPC方法
+		    info *grpc.UnaryServerInfo,
 		    handler grpc.UnaryHandler,//第四个参数handler对应当前的gRPC函数。
 ) (resp interface{}, err error) {
     log.Println("fileter:", info)
