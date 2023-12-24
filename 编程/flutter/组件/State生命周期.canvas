@@ -1,0 +1,27 @@
+{
+	"nodes":[
+		{"id":"fe3a85d133db4c16","type":"text","text":"didUpdateWidget\n在 widget 重新构建时，Flutter 框架会调用widget.canUpdate来检测 widget 树中同一位置的新旧节点，然后决定是否需要更新，如果widget.canUpdate返回true则会调用此回调。","x":-160,"y":220,"width":250,"height":240},
+		{"id":"1b0a5cdafba069c0","type":"text","text":"initState\n当 widget 第一次插入到 widget 树时会被调用，对于每一个State对象，Flutter 框架只会调用一次该回调，所以，通常在该回调中做一些一次性的操作，如状态初始化、订阅子树的事件通知等。","x":-597,"y":220,"width":375,"height":180},
+		{"id":"6576dfafeac1a460","type":"text","text":"StatefulWidget launched\n","x":-500,"y":100,"width":180,"height":80},
+		{"id":"04dde267bad7acef","type":"text","text":"didChangeDependencies\n当State对象的依赖发生变化时会被调用","x":-847,"y":460,"width":250,"height":100},
+		{"id":"c441ee493c88ff71","type":"text","text":"dispose\n当 State 对象从树中被永久移除时调用；通常在此回调中释放资源","x":-557,"y":1140,"width":250,"height":120},
+		{"id":"6fdc463cfd05b858","type":"text","text":"build\n用于构建 widget 子树的，会在如下场景被调用：\n\n在调用initState()之后。\n在调用didUpdateWidget()之后。\n在调用setState()之后。\n在调用didChangeDependencies()之后。\n在State对象从树中一个位置移除后（会调用deactivate）又重新插入到树的其他位置之后。\n","x":-579,"y":600,"width":295,"height":340},
+		{"id":"b14e5a1499f79817","type":"text","text":"hot reload ?     yes    |        no\n","x":-160,"y":740,"width":250,"height":60},
+		{"id":"39fd431c4e8af57c","type":"text","text":"reassemble\n此回调是专门为了开发调试而提供的，在热重载(hot reload)时会被调用，此回调在Release模式下永远不会被调用。","x":-160,"y":510,"width":250,"height":190},
+		{"id":"8374cf8d3c03051e","type":"text","text":"deactivate\n当 State 对象从树中被移除时，会调用此回调。","x":-557,"y":980,"width":250,"height":120},
+		{"id":"725fdb9b52ff96d3","type":"text","text":"StatefulWidget destroyed\n","x":-557,"y":1300,"width":250,"height":60}
+	],
+	"edges":[
+		{"id":"6592864de8e8b526","fromNode":"6576dfafeac1a460","fromSide":"bottom","toNode":"1b0a5cdafba069c0","toSide":"top"},
+		{"id":"d2c41f352b00c30f","fromNode":"1b0a5cdafba069c0","fromSide":"bottom","toNode":"04dde267bad7acef","toSide":"top"},
+		{"id":"0313609bdc2c8903","fromNode":"04dde267bad7acef","fromSide":"bottom","toNode":"6fdc463cfd05b858","toSide":"top"},
+		{"id":"a28820fdc9979ebb","fromNode":"6fdc463cfd05b858","fromSide":"bottom","toNode":"8374cf8d3c03051e","toSide":"top"},
+		{"id":"26382cfa05da4784","fromNode":"8374cf8d3c03051e","fromSide":"bottom","toNode":"c441ee493c88ff71","toSide":"top"},
+		{"id":"f0ac725f2d6df325","fromNode":"c441ee493c88ff71","fromSide":"bottom","toNode":"725fdb9b52ff96d3","toSide":"top"},
+		{"id":"3dae91c811101613","fromNode":"6fdc463cfd05b858","fromSide":"right","toNode":"b14e5a1499f79817","toSide":"left"},
+		{"id":"f336d2b18e9aceb1","fromNode":"b14e5a1499f79817","fromSide":"top","toNode":"39fd431c4e8af57c","toSide":"bottom"},
+		{"id":"f82248bc2b363164","fromNode":"39fd431c4e8af57c","fromSide":"top","toNode":"fe3a85d133db4c16","toSide":"bottom"},
+		{"id":"194db04809084df3","fromNode":"b14e5a1499f79817","fromSide":"right","toNode":"fe3a85d133db4c16","toSide":"right"},
+		{"id":"3a84ed9ecec63969","fromNode":"fe3a85d133db4c16","fromSide":"left","toNode":"6fdc463cfd05b858","toSide":"top"}
+	]
+}
